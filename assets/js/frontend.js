@@ -1,6 +1,17 @@
 'use strict';
 
 (function ($) {
+    var loadingSVG = '<svg width="32" height="20" viewBox="0 0 32 20" xmlns="http://www.w3.org/2000/svg">' +
+        '<circle fill="#F24A00" cx="6" cy="10" r="3">' +
+        '<animateTransform attributeName="transform" type="translate" dur="1s" values="0 5; 0 -5; 0 5" repeatCount="indefinite" begin="0.1s" />' +
+        '</circle>' +
+        '<circle fill="#F24A00" cx="16" cy="10" r="3">' +
+        '<animateTransform attributeName="transform" type="translate" dur="1s" values="0 4; 0 -4; 0 4" repeatCount="indefinite" begin="0.2s" />' +
+        '</circle>' +
+        '<circle fill="#F24A00" cx="26" cy="10" r="3">' +
+        '<animateTransform attributeName="transform" type="translate" dur="1s" values="0 3; 0 -3; 0 3" repeatCount="indefinite" begin="0.3s" />' +
+        '</circle>' +
+        '</svg>';
     $(function () {
         if (!$('.woobt-wrap').length) {
             return;
@@ -505,6 +516,157 @@
         }
     });
 
+    // Handle click on add to cart icon for individual products
+    $(document).on('click touch', '.woobt-add-to-cart-icon', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        var $icon = $(this);
+        var productId = parseInt($icon.attr('data-product-id'));
+        var $product = $icon.closest('.woobt-product');
+        var quantity = 1;
+        
+        // Get quantity if available
+        var $qtyInput = $product.find('.woobt-qty, .qty');
+        if ($qtyInput.length) {
+            quantity = parseFloat($qtyInput.val()) || 1;
+        }
+        
+        if (!productId || productId <= 0) {
+            return;
+        }
+        
+        // Prevent multiple clicks
+        if ($icon.hasClass('woobt-loading')) {
+            return;
+        }
+        
+        // Add loading state
+        var originalText = $icon.text();
+        $icon.addClass('woobt-loading').html(loadingSVG);
+        
+        // Prepare data for AJAX request
+        var data = {
+            product_id: productId,
+            quantity: quantity,
+            nonce: woobt_vars.nonce
+        };
+        
+        // Use custom AJAX endpoint
+        $.post(woobt_vars.wc_ajax_url.toString().replace('%%endpoint%%', 'woobt_add_single_to_cart'), data, function (response) {
+            $icon.removeClass('woobt-loading').html(originalText);
+            
+            if (!response) {
+                woobt_show_message(woobt_vars.alert_selection || 'add to cart failed, please try again', 'error');
+                return;
+            }
+            
+            if (response.error) {
+                var errorMsg = response.message || 'add to cart failed, please try again';
+                woobt_show_message(errorMsg, 'error');
+                
+                if (response.product_url) {
+                    setTimeout(function() {
+                        window.location = response.product_url;
+                    }, 2000);
+                }
+                return;
+            }
+            
+            // Check if redirect is needed
+            if ((typeof wc_add_to_cart_params !== 'undefined') && (wc_add_to_cart_params.cart_redirect_after_add === 'yes')) {
+                window.location = wc_add_to_cart_params.cart_url;
+                return;
+            }
+            
+            // Get product name from the product element
+            var productName = $product.find('.woobt-title-inner').text().trim();
+            if (!productName) {
+                productName = $product.find('.woobt-title').text().trim();
+            }
+            if (!productName) {
+                productName = 'Product';
+            }
+            
+            // Show WooCommerce success notice with product name
+            var successMessage = productName + ' has been added to your cart successfully!';
+            woobt_show_wc_notice(successMessage, 'success');
+            
+            // Update cart fragments without triggering WooCommerce default notices
+            if (response.fragments) {
+                // Update fragments directly without triggering added_to_cart event
+                $.each(response.fragments, function(key, value) {
+                    $(key).replaceWith(value);
+                });
+                
+                // Update cart hash
+                if (response.cart_hash) {
+                    sessionStorage.setItem('wc_cart_hash', response.cart_hash);
+                }
+                
+                // Trigger custom event only (not WooCommerce's added_to_cart)
+                $(document.body).trigger('woobt_added_to_cart', [response.fragments, response.cart_hash, $icon]);
+                $(document.body).trigger('wc_fragments_refreshed');
+            }
+            
+        }).fail(function(xhr, status, error) {
+            $icon.removeClass('woobt-loading').html(originalText);
+            // 英文
+            woobt_show_message('Add to cart failed, please try again', 'error');
+            console.error('Add to cart error:', error);
+        });
+    });
+    
+    // Function to show WooCommerce style notice
+    function woobt_show_wc_notice(message, type) {
+        type = type || 'success';
+        
+        // Create WooCommerce style notice
+        var noticeClass = type === 'error' ? 'woocommerce-error' : 'woocommerce-message';
+        var $notice = $('<div class="' + noticeClass + ' woobt-notice" role="alert">' + message + '</div>');
+        
+        // Remove existing notices
+        $('.woobt-notice').remove();
+        
+        // Insert notice
+        var $wrapper = $('.woocommerce-notices-wrapper').first();
+        if ($wrapper.length) {
+            $wrapper.prepend($notice);
+        } else {
+            // If no wrapper exists, create one
+            $wrapper = $('<div class="woocommerce-notices-wrapper"></div>');
+            $wrapper.append($notice);
+            
+            // Try to insert in common locations
+            if ($('.woobt-wrap').length) {
+                $wrapper.insertBefore('.woobt-wrap').first();
+            } else if ($('main').length) {
+                $wrapper.prependTo('main');
+            } else if ($('.site-content').length) {
+                $wrapper.prependTo('.site-content');
+            } else {
+                $wrapper.prependTo('body');
+            }
+        }
+        
+        // Scroll to notice
+        $('html, body').animate({
+            scrollTop: $notice.offset().top - 100
+        }, 300);
+        
+        // Auto remove after 5 seconds
+        setTimeout(function() {
+            $notice.fadeOut(function() {
+                $(this).remove();
+            });
+        }, 5000);
+    }
+    
+    // Keep old function for backward compatibility
+    function woobt_show_message(message, type) {
+        woobt_show_wc_notice(message, type);
+    }
+
     $(document).on('change', '.woobt-checkbox', function () {
         var $this = $(this);
         var $wrap = $this.closest('.woobt-wrap');
@@ -645,6 +807,7 @@ function woobt_init($wrap) {
         woobt_check_ready($wrap);
         woobt_calc_price($wrap);
         woobt_save_ids($wrap);
+        woobt_init_scroll_controls($wrap);
 
         if (woobt_vars.counter !== 'hide') {
             woobt_update_count($wrap);
@@ -652,6 +815,141 @@ function woobt_init($wrap) {
     }
 
     jQuery(document).trigger('woobt_init', [$wrap]);
+}
+
+// Initialize scroll controls for default layout
+function woobt_init_scroll_controls($wrap) {
+    var $products = $wrap.find('.woobt-products-layout-default');
+    if (!$products.length) {
+        return;
+    }
+    
+    var $scrollControls = $wrap.find('.woobt-scroll-controls');
+    if (!$scrollControls.length) {
+        return;
+    }
+    
+    var $leftBtn = $scrollControls.find('.woobt-scroll-left');
+    var $rightBtn = $scrollControls.find('.woobt-scroll-right');
+    
+    function getScrollAmount() {
+        // Get container width (visible area)
+        var containerWidth = $products.width();
+        var isMobile = window.innerWidth < 768;
+        
+        // Calculate one page width: container width (which shows 3 on mobile, 4 on PC)
+        // This will scroll exactly one page of products
+        return containerWidth;
+    }
+    
+    function updateButtons() {
+        var scrollLeft = $products.scrollLeft();
+        var scrollWidth = $products[0].scrollWidth;
+        var clientWidth = $products[0].clientWidth;
+        
+        if (scrollLeft <= 5) {
+            $leftBtn.prop('disabled', true);
+        } else {
+            $leftBtn.prop('disabled', false);
+        }
+        
+        if (scrollLeft >= scrollWidth - clientWidth - 5) {
+            $rightBtn.prop('disabled', true);
+        } else {
+            $rightBtn.prop('disabled', false);
+        }
+    }
+    
+    setTimeout(function() {
+        updateButtons();
+    }, 100);
+    
+    $products.off('scroll.woobt-scroll').on('scroll.woobt-scroll', updateButtons);
+    
+    // Ultra smooth scroll function with easeInOutQuart for silky smooth animation
+    function smoothScrollTo(element, target, duration) {
+        var start = element.scrollLeft;
+        var change = target - start;
+        var startTime = null;
+        
+        // Cancel any existing scroll animation
+        if (element._scrollAnimationId) {
+            cancelAnimationFrame(element._scrollAnimationId);
+        }
+        
+        function animateScroll(currentTime) {
+            if (startTime === null) {
+                startTime = currentTime;
+            }
+            
+            var timeElapsed = currentTime - startTime;
+            var progress = Math.min(timeElapsed / duration, 1);
+            
+            // Easing function: easeInOutQuart - ultra smooth, silky animation
+            // This provides the smoothest possible animation curve
+            var ease;
+            if (progress < 0.5) {
+                ease = 8 * progress * progress * progress * progress;
+            } else {
+                var t = progress - 1;
+                ease = 1 - 8 * t * t * t * t;
+            }
+            
+            element.scrollLeft = start + change * ease;
+            
+            // Update buttons during animation for better responsiveness
+            updateButtons();
+            
+            if (timeElapsed < duration) {
+                element._scrollAnimationId = requestAnimationFrame(animateScroll);
+            } else {
+                element.scrollLeft = target;
+                element._scrollAnimationId = null;
+                updateButtons();
+            }
+        }
+        
+        element._scrollAnimationId = requestAnimationFrame(animateScroll);
+    }
+    
+    $leftBtn.off('click.woobt-scroll').on('click.woobt-scroll', function(e) {
+        e.preventDefault();
+        if (jQuery(this).prop('disabled')) {
+            return false;
+        }
+        var scrollAmount = getScrollAmount();
+        var currentScroll = $products[0].scrollLeft;
+        var newScroll = Math.max(0, currentScroll - scrollAmount);
+        // Reduce animation duration to 400ms for faster response
+        smoothScrollTo($products[0], newScroll, 20);
+        // Immediately update buttons for instant feedback
+        updateButtons();
+        return false;
+    });
+    
+    $rightBtn.off('click.woobt-scroll').on('click.woobt-scroll', function(e) {
+        e.preventDefault();
+        if (jQuery(this).prop('disabled')) {
+            return false;
+        }
+        var scrollAmount = getScrollAmount();
+        var currentScroll = $products[0].scrollLeft;
+        var maxScroll = $products[0].scrollWidth - $products[0].clientWidth;
+        var newScroll = Math.min(maxScroll, currentScroll + scrollAmount);
+        // Reduce animation duration to 400ms for faster response
+        smoothScrollTo($products[0], newScroll, 20);
+        // Immediately update buttons for instant feedback
+        updateButtons();
+        return false;
+    });
+    
+    var resizeTimer;
+    jQuery(window).off('resize.woobt-scroll').on('resize.woobt-scroll', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            updateButtons();
+        }, 200);
+    });
 }
 
 function woobt_carousel($wrap) {

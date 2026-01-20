@@ -96,6 +96,7 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 			// Frontend AJAX
 			add_action( 'wc_ajax_woobt_get_variation_items', [ $this, 'ajax_get_variation_items' ] );
 			add_action( 'wc_ajax_woobt_add_all_to_cart', [ $this, 'ajax_add_all_to_cart' ] );
+			add_action( 'wc_ajax_woobt_add_single_to_cart', [ $this, 'ajax_add_single_to_cart' ] );
 
 			// Cart contents
 			add_action( 'woocommerce_before_mini_cart_contents', [ $this, 'before_mini_cart_contents' ], 9999 );
@@ -1945,6 +1946,60 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 			wp_die();
 		}
 
+		function ajax_add_single_to_cart() {
+			if ( ! isset( $_POST['product_id'] ) ) {
+				wp_send_json_error( [ 'message' => esc_html__( 'Product ID is required.', 'woo-bought-together' ) ] );
+				return;
+			}
+
+			$product_id = apply_filters( 'woocommerce_add_to_cart_product_id', absint( $_POST['product_id'] ) );
+			$product    = wc_get_product( $product_id );
+
+			if ( ! $product ) {
+				wp_send_json_error( [ 'message' => esc_html__( 'Product not found.', 'woo-bought-together' ) ] );
+				return;
+			}
+
+			$quantity = empty( $_POST['quantity'] ) ? 1 : wc_stock_amount( wp_unslash( $_POST['quantity'] ) );
+
+			// Validate and add to cart
+			$passed_validation = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, $quantity, 0, [] );
+
+			if ( $passed_validation && false !== WC()->cart->add_to_cart( $product_id, $quantity ) && 'publish' === $product->get_status() ) {
+				do_action( 'woocommerce_ajax_added_to_cart', $product_id );
+
+				// Get success message without "View cart" link
+				$product_name = $product->get_name();
+				if ( $quantity > 1 ) {
+					$message = sprintf( esc_html__( '%1$s × %2$d 已添加到购物车', 'woo-bought-together' ), $product_name, $quantity );
+				} else {
+					$message = sprintf( esc_html__( '%s 已添加到购物车', 'woo-bought-together' ), $product_name );
+				}
+				
+				// Simple success message
+				$message = esc_html__( '加购成功！', 'woo-bought-together' );
+
+				// Get refreshed fragments
+				$data = WC_AJAX::get_refreshed_fragments();
+
+				// Add success message to response
+				$data['message'] = $message;
+				$data['success'] = true;
+
+				wp_send_json( $data );
+			} else {
+				$data = [
+					'error'       => true,
+					'message'     => esc_html__( 'Failed to add product to cart.', 'woo-bought-together' ),
+					'product_url' => apply_filters( 'woocommerce_cart_redirect_after_error', get_permalink( $product_id ), $product_id ),
+				];
+
+				wp_send_json( $data );
+			}
+
+			wp_die();
+		}
+
 		function before_mini_cart_contents() {
 			WC()->cart->calculate_totals();
 		}
@@ -3097,30 +3152,38 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 						if ( $hide_this_item ) {
 							?>
-                            <div class="woobt-product woobt-product-this woobt-hide-this" <?php echo WPCleverWoobt_Helper()->data_attributes( $this_item_attrs ); ?>>
+                            <!-- <div class="woobt-product woobt-product-this woobt-hide-this" <?php echo WPCleverWoobt_Helper()->data_attributes( $this_item_attrs ); ?>>
                                 <div class="woobt-choose">
                                     <label for="woobt_checkbox_0"><?php echo esc_html( $this_item_name ); ?></label>
                                     <input id="woobt_checkbox_0" class="woobt-checkbox woobt-checkbox-this"
                                            type="checkbox" checked disabled/>
                                     <span class="checkmark"></span>
                                 </div>
-                            </div>
+                            </div> -->
 						<?php } else { ?>
                             <div class="woobt-product woobt-product-this" <?php echo WPCleverWoobt_Helper()->data_attributes( $this_item_attrs ); ?>>
 
 								<?php do_action( 'woobt_product_before', $product ); ?>
 
-                                <div class="woobt-choose">
+                                <!-- <div class="woobt-choose">
                                     <label for="woobt_checkbox_0"><?php echo esc_html( $this_item_name ); ?></label>
                                     <input id="woobt_checkbox_0" class="woobt-checkbox woobt-checkbox-this"
                                            type="checkbox" checked disabled/>
                                     <span class="checkmark"></span>
-                                </div>
+                                </div> -->
 
 								<?php if ( ! $separate_images && ( WPCleverWoobt_Helper()->get_setting( 'show_thumb', 'yes' ) !== 'no' ) ) {
 									echo '<div class="woobt-thumb">';
 									do_action( 'woobt_product_thumb_before', $product, 0, 'default' );
 									echo '<span class="woobt-img woobt-img-order-0" data-img="' . esc_attr( htmlentities( $product->get_image( self::$image_size ) ) ) . '">' . $product->get_image( self::$image_size ) . '</span>';
+									
+									// Stock status tag on top-left of image
+									if ( ! $product->is_in_stock() ) {
+										echo '<span class="woobt-stock-tag woobt-stock-soldout">SOLD OUT</span>';
+									} elseif ( $product->is_on_sale() ) {
+										echo '<span class="woobt-stock-tag woobt-stock-sale">SALE</span>';
+									}
+									
 									do_action( 'woobt_product_thumb_after', $product, 0, 'default' );
 									echo '</div>';
 								} ?>
@@ -3132,7 +3195,7 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 									<?php if ( $separate_images && ( WPCleverWoobt_Helper()->get_setting( 'show_price', 'yes' ) !== 'no' ) ) { ?>
                                         <span class="woobt-price">
-                                        <span class="woobt-price-new">
+                                        <span class="woobt-price-ori">
                                             <?php
                                             if ( ! $separately && ( $discount = get_post_meta( $product_id, 'woobt_discount', true ) ) ) {
 	                                            $sale_price = $product->get_price() * ( 100 - (float) $discount ) / 100;
@@ -3142,91 +3205,11 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
                                             }
                                             ?>
                                         </span>
-                                        <span class="woobt-price-ori">
-                                            <?php echo $product->get_price_html(); ?>
-                                        </span>
                                     </span>
 									<?php }
 
-									if ( ( $separate_atc || $custom_position ) && $product->is_type( 'variable' ) ) {
-										// this item's variations
-										if ( ( WPCleverWoobt_Helper()->get_setting( 'variations_selector', 'default' ) === 'woovr' ) && class_exists( 'WPClever_Woovr' ) ) {
-											echo '<div class="wpc_variations_form">';
-											// use class name wpc_variations_form to prevent found_variation in woovr
-											WPClever_Woovr::woovr_variations_form( $product, false, 'woobt' );
-											echo '</div>';
-										} else {
-											$attributes           = $product->get_variation_attributes();
-											$available_variations = $product->get_available_variations();
-
-											if ( is_array( $attributes ) && ( count( $attributes ) > 0 ) ) {
-												echo '<div class="variations_form woobt_variations_form" action="' . esc_url( $product->get_permalink() ) . '" data-product_id="' . absint( $product_id ) . '" data-product_variations="' . htmlspecialchars( wp_json_encode( $available_variations ) ) . '">';
-
-												if ( apply_filters( 'woobt_variations_table_layout', false ) ) {
-													echo '<table class="variations" cellspacing="0" role="presentation"><tbody>';
-
-													foreach ( $attributes as $attribute_name => $options ) {
-														$attribute_name_sz = sanitize_title( $attribute_name );
-														?>
-                                                        <tr class="<?php echo esc_attr( 'variation variation-' . $attribute_name_sz ); ?>">
-                                                            <th class="label">
-                                                                <label for="<?php echo esc_attr( $attribute_name_sz ); ?>"><?php echo esc_html( wc_attribute_label( $attribute_name ) ); ?></label>
-                                                            </th>
-                                                            <td class="value">
-																<?php
-																$selected = isset( $_REQUEST[ 'attribute_' . sanitize_title( $attribute_name ) ] ) ? wc_clean( stripslashes( urldecode( $_REQUEST[ 'attribute_' . sanitize_title( $attribute_name ) ] ) ) ) : $product->get_variation_default_attribute( $attribute_name );
-																wc_dropdown_variation_attribute_options( [
-																	'options'          => $options,
-																	'attribute'        => $attribute_name,
-																	'product'          => $product,
-																	'selected'         => $selected,
-																	'show_option_none' => sprintf( WPCleverWoobt_Helper()->localization( 'choose', /* translators: attribute name */ esc_html__( 'Choose %s', 'woo-bought-together' ) ), wc_attribute_label( $attribute_name ) )
-																] );
-																?>
-                                                            </td>
-                                                        </tr>
-													<?php }
-
-													echo '</tbody></table><!-- /.variations -->';
-												} else {
-													echo '<div class="variations">';
-
-													foreach ( $attributes as $attribute_name => $options ) {
-														$attribute_name_sz = sanitize_title( $attribute_name );
-														?>
-                                                        <div class="<?php echo esc_attr( 'variation variation-' . $attribute_name_sz ); ?>">
-                                                            <div class="label">
-                                                                <label for="<?php echo esc_attr( $attribute_name_sz ); ?>"><?php echo esc_html( wc_attribute_label( $attribute_name ) ); ?></label>
-                                                            </div>
-                                                            <div class="value">
-																<?php
-																$selected = isset( $_REQUEST[ 'attribute_' . sanitize_title( $attribute_name ) ] ) ? wc_clean( stripslashes( urldecode( $_REQUEST[ 'attribute_' . sanitize_title( $attribute_name ) ] ) ) ) : $product->get_variation_default_attribute( $attribute_name );
-																wc_dropdown_variation_attribute_options( [
-																	'options'          => $options,
-																	'attribute'        => $attribute_name,
-																	'product'          => $product,
-																	'selected'         => $selected,
-																	'show_option_none' => sprintf( WPCleverWoobt_Helper()->localization( 'choose', /* translators: attribute name */ esc_html__( 'Choose %s', 'woo-bought-together' ) ), wc_attribute_label( $attribute_name ) )
-																] );
-																?>
-                                                            </div>
-                                                        </div>
-													<?php }
-
-													echo '</div><!-- /.variations -->';
-												}
-
-												echo '<div class="reset">' . apply_filters( 'woocommerce_reset_variations_link', '<a class="reset_variations" href="#">' . WPCleverWoobt_Helper()->localization( 'clear', esc_html__( 'Clear', 'woo-bought-together' ) ) . '</a>' ) . '</div>';
-												echo '</div><!-- /.variations_form -->';
-
-												if ( WPCleverWoobt_Helper()->get_setting( 'show_description', 'no' ) === 'yes' ) {
-													echo '<div class="woobt-variation-description"></div>';
-												}
-											}
-										}
-									}
-
-									echo '<div class="woobt-availability">' . wc_get_stock_html( $product ) . '</div>';
+									// Variations form removed - variable products will not show add to cart icon
+									// Stock status moved to image tag
 									?>
                                 </div>
 
@@ -3268,7 +3251,7 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 								if ( ! $separate_images && ( WPCleverWoobt_Helper()->get_setting( 'show_price', 'yes' ) !== 'no' ) ) { ?>
                                     <div class="woobt-price">
-                                        <div class="woobt-price-new">
+                                        <div class="woobt-price-ori">
 											<?php
 											if ( ! $separately && ( $discount = get_post_meta( $product_id, 'woobt_discount', true ) ) ) {
 												$sale_price = $product->get_price() * ( 100 - (float) $discount ) / 100;
@@ -3278,9 +3261,12 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 											}
 											?>
                                         </div>
-                                        <div class="woobt-price-ori">
-											<?php echo $product->get_price_html(); ?>
-                                        </div>
+										<?php
+										// Show add to cart icon for simple products only (not variable)
+										if ( ! $product->is_type( 'variable' ) && $product->is_in_stock() && $product->is_purchasable() ) {
+											echo '<span class="woobt-add-to-cart-icon" data-product-id="' . esc_attr( $product_id ) . '" title="' . esc_attr__( 'Add to cart', 'woo-bought-together' ) . '">+</span>';
+										}
+										?>
                                     </div>
 								<?php }
 
@@ -3358,13 +3344,6 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 								<?php do_action( 'woobt_product_before', $product, $order ); ?>
 
-                                <div class="woobt-choose">
-                                    <label for="<?php echo esc_attr( 'woobt_checkbox_' . $order ); ?>"><?php echo esc_html( $item_name ); ?></label>
-                                    <input id="<?php echo esc_attr( 'woobt_checkbox_' . $order ); ?>"
-                                           class="woobt-checkbox" type="checkbox"
-                                           value="<?php echo esc_attr( $item_id ); ?>" <?php echo esc_attr( $item_disabled ? 'disabled' : '' ); ?> <?php echo esc_attr( $item_checked ? 'checked' : '' ); ?>/>
-                                    <span class="checkmark"></span>
-                                </div>
 
 								<?php if ( ! $separate_images && ( WPCleverWoobt_Helper()->get_setting( 'show_thumb', 'yes' ) !== 'no' ) ) {
 									echo '<div class="woobt-thumb">';
@@ -3375,6 +3354,13 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 										echo '<a class="' . esc_attr( WPCleverWoobt_Helper()->get_setting( 'link', 'yes' ) === 'yes_popup' ? 'woosq-link woobt-img woobt-img-order-' . $order : 'woobt-img woobt-img-order-' . $order ) . '" data-id="' . esc_attr( $item_id ) . '" data-context="woobt" href="' . $product->get_permalink() . '" data-img="' . esc_attr( htmlentities( $product->get_image( self::$image_size ) ) ) . '" ' . ( WPCleverWoobt_Helper()->get_setting( 'link', 'yes' ) === 'yes_blank' ? 'target="_blank"' : '' ) . '>' . $product->get_image( self::$image_size ) . '</a>';
 									} else {
 										echo '<span class="' . esc_attr( 'woobt-img woobt-img-order-' . $order ) . '" data-img="' . esc_attr( htmlentities( $product->get_image( self::$image_size ) ) ) . '">' . $product->get_image( self::$image_size ) . '</span>';
+									}
+									
+									// Stock status tag on top-left of image
+									if ( ! $product->is_in_stock() ) {
+										echo '<span class="woobt-stock-tag woobt-stock-soldout">SOLD OUT</span>';
+									} elseif ( $product->is_on_sale() ) {
+										echo '<span class="woobt-stock-tag woobt-stock-sale">SALE</span>';
 									}
 
 									do_action( 'woobt_product_thumb_after', $product, $order, 'default', $item );
@@ -3419,7 +3405,7 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 										do_action( 'woobt_product_price_before', $product, $order );
 
-										echo '<span class="woobt-price-new"></span>';
+										// echo '<span class="woobt-price-new"></span>';
 										echo '<span class="woobt-price-ori">';
 
 										if ( ! $separately && ( $item_price !== '100%' ) ) {
@@ -3463,136 +3449,19 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 										echo '<div class="woobt-description">' . apply_filters( 'woobt_product_short_description', $product->is_type( 'variation' ) ? $product->get_description() : $product->get_short_description(), $product ) . '</div>';
 									}
 
-									if ( $product->is_type( 'variable' ) ) {
-										if ( ( WPCleverWoobt_Helper()->get_setting( 'variations_selector', 'default' ) === 'woovr' ) && class_exists( 'WPClever_Woovr' ) ) {
-											echo '<div class="wpc_variations_form">';
-											// use class name wpc_variations_form to prevent found_variation in woovr
-											WPClever_Woovr::woovr_variations_form( $product, false, 'woobt' );
-											echo '</div>';
-										} else {
-											$attributes           = $product->get_variation_attributes();
-											$available_variations = $product->get_available_variations();
-
-											if ( is_array( $attributes ) && ( count( $attributes ) > 0 ) ) {
-												echo '<div class="variations_form woobt_variations_form" action="' . esc_url( $product->get_permalink() ) . '" data-product_id="' . absint( $product->get_id() ) . '" data-product_variations="' . htmlspecialchars( wp_json_encode( $available_variations ) ) . '">';
-
-												if ( apply_filters( 'woobt_variations_table_layout', false ) ) {
-													echo '<table class="variations" cellspacing="0" role="presentation"><tbody>';
-
-													foreach ( $attributes as $attribute_name => $options ) {
-														$attribute_name_sz = sanitize_title( $attribute_name );
-														?>
-                                                        <tr class="<?php echo esc_attr( 'variation variation-' . $attribute_name_sz ); ?>">
-                                                            <th class="label">
-                                                                <label for="<?php echo esc_attr( $attribute_name_sz ); ?>"><?php echo esc_html( wc_attribute_label( $attribute_name ) ); ?></label>
-                                                            </th>
-                                                            <td class="value">
-																<?php
-																wc_dropdown_variation_attribute_options( [
-																	'options'          => $options,
-																	'attribute'        => $attribute_name,
-																	'product'          => $product,
-																	'show_option_none' => sprintf( WPCleverWoobt_Helper()->localization( 'choose', /* translators: attribute name */ esc_html__( 'Choose %s', 'woo-bought-together' ) ), wc_attribute_label( $attribute_name ) )
-																] );
-																?>
-                                                            </td>
-                                                        </tr>
-													<?php }
-
-													echo '</tbody></table><!-- /.variations -->';
-												} else {
-													echo '<div class="variations">';
-
-													foreach ( $attributes as $attribute_name => $options ) {
-														$attribute_name_sz = sanitize_title( $attribute_name );
-														?>
-                                                        <div class="<?php echo esc_attr( 'variation variation-' . $attribute_name_sz ); ?>">
-                                                            <div class="label">
-                                                                <label for="<?php echo esc_attr( $attribute_name_sz ); ?>"><?php echo esc_html( wc_attribute_label( $attribute_name ) ); ?></label>
-                                                            </div>
-                                                            <div class="value">
-																<?php
-																wc_dropdown_variation_attribute_options( [
-																	'options'          => $options,
-																	'attribute'        => $attribute_name,
-																	'product'          => $product,
-																	'show_option_none' => sprintf( WPCleverWoobt_Helper()->localization( 'choose', /* translators: attribute name */ esc_html__( 'Choose %s', 'woo-bought-together' ) ), wc_attribute_label( $attribute_name ) )
-																] );
-																?>
-                                                            </div>
-                                                        </div>
-													<?php }
-
-													echo '</div><!-- /.variations -->';
-												}
-
-												echo '<div class="reset">' . apply_filters( 'woocommerce_reset_variations_link', '<a class="reset_variations" href="#">' . WPCleverWoobt_Helper()->localization( 'clear', esc_html__( 'Clear', 'woo-bought-together' ) ) . '</a>' ) . '</div>';
-												echo '</div><!-- /.variations_form -->';
-
-												if ( WPCleverWoobt_Helper()->get_setting( 'show_description', 'no' ) === 'yes' ) {
-													echo '<div class="woobt-variation-description"></div>';
-												}
-											}
-										}
-									}
-
-									echo '<div class="woobt-availability">' . apply_filters( 'woobt_product_availability', wc_get_stock_html( $product ), $product ) . '</div>';
+									// Variations form removed - variable products will not show add to cart icon
+									// Stock status moved to image tag
 									?>
                                 </div>
 
 								<?php
-								if ( $custom_qty ) {
-									echo '<div class="' . esc_attr( ( $plus_minus ? 'woobt-quantity woobt-quantity-plus-minus' : 'woobt-quantity' ) ) . '">';
-
-									do_action( 'woobt_product_qty_before', $product, $order );
-
-									if ( $plus_minus ) {
-										echo '<div class="woobt-quantity-input">';
-										echo '<div class="woobt-quantity-input-minus">-</div>';
-									}
-
-									$qty_args = [
-										'classes'     => [
-											'input-text',
-											'woobt-qty',
-											'woobt_qty',
-											'qty',
-											'text'
-										],
-										'input_name'  => 'woobt_qty_' . $order,
-										'input_value' => $item_qty,
-										'min_value'   => $item_min,
-										'max_value'   => $item_max,
-										'woobt_qty'   => [
-											'input_value' => $item_qty,
-											'min_value'   => $item_min,
-											'max_value'   => $item_max
-										]
-										// compatible with WPC Product Quantity
-									];
-
-									if ( apply_filters( 'woobt_use_woocommerce_quantity_input', true ) ) {
-										woocommerce_quantity_input( $qty_args, $product );
-									} else {
-										echo apply_filters( 'woobt_quantity_input', '<input type="number" class="input-text woobt-qty woobt_qty qty text" name="' . esc_attr( 'woobt_qty_' . $order ) . '" value="' . esc_attr( $item_qty ) . '" min="' . esc_attr( $item_min ) . '" max="' . esc_attr( $item_max ) . '" />', $qty_args, $product );
-									}
-
-									if ( $plus_minus ) {
-										echo '<div class="woobt-quantity-input-plus">+</div>';
-										echo '</div>';
-									}
-
-									do_action( 'woobt_product_qty_after', $product, $order );
-
-									echo '</div>';
-								}
+								
 
 								if ( ! $separate_images && ( WPCleverWoobt_Helper()->get_setting( 'show_price', 'yes' ) !== 'no' ) ) {
 									echo '<div class="woobt-price">';
 
 									do_action( 'woobt_product_price_before', $product, $order );
 
-									echo '<div class="woobt-price-new"></div>';
 									echo '<div class="woobt-price-ori">';
 
 									if ( ! $separately && ( $item_price !== '100%' ) ) {
@@ -3629,6 +3498,11 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 									do_action( 'woobt_product_price_after', $product, $order );
 
+									// Show add to cart icon for simple products only (not variable)
+									if ( ! $product->is_type( 'variable' ) && $product->is_in_stock() && $product->is_purchasable() ) {
+										echo '<span class="woobt-add-to-cart-icon" data-product-id="' . esc_attr( $item_id ) . '" data-order="' . esc_attr( $order ) . '" title="' . esc_attr__( 'Add to cart', 'woo-bought-together' ) . '">+</span>';
+									}
+
 									echo '</div><!-- /.woobt-price -->';
 								}
 								?>
@@ -3652,6 +3526,24 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 					do_action( 'woobt_products_after', $product );
 					?>
                 </div><!-- /woobt-products -->
+				
+				<?php if ( $layout === 'default' ) { ?>
+					<div class="woobt-scroll-controls">
+						<div class="woobt-scroll-btn-group">
+						<button class="woobt-scroll-btn woobt-scroll-left" aria-label="Scroll left">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						<button class="woobt-scroll-btn woobt-scroll-right" aria-label="Scroll right">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						</div>
+					</div>
+				<?php } ?>
+				
 				<?php
 				do_action( 'woobt_products_below', $product );
 
