@@ -77,6 +77,9 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 			// appears right after the gallery / thumbnails section.
 			add_action( 'woocommerce_product_thumbnails', [ $this, 'show_items_after_thumbnails' ], 20 );
 
+			// Show items after product meta end (for viewport <= 1000px)
+			add_action( 'woocommerce_product_meta_end', [ $this, 'show_items_after_meta_end' ] );
+
 			// Show items in custom position
 			add_action( 'woobt_custom_position', [ $this, 'show_items_position' ] );
 
@@ -2815,7 +2818,10 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 		function show_items_after_thumbnails() {
 			// Always show items when hooked after product thumbnails.
+			// Hide when viewport <= 1000px (controlled by CSS media query)
+			echo '<div class="woobt-after-thumbnails-wrapper">';
 			self::show_items();
+			echo '</div>';
 		}
 
 		function show_items_position( $pos = 'before' ) {
@@ -2855,6 +2861,21 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 
 		function show_items_below_meta() {
 			self::show_items_position( 'below_meta' );
+		}
+
+		function show_items_after_meta_end() {
+			// Show items after product meta end (for viewport <= 1000px)
+			// This will be controlled by CSS media query
+			global $product;
+
+			if ( ! $product || ! is_a( $product, 'WC_Product' ) ) {
+				return;
+			}
+
+			// Always show items here, but hide by default (CSS will show it when viewport <= 1000px)
+			echo '<div class="woobt-wrap woobt-meta-end" style="display: none;">';
+			self::show_items();
+			echo '</div>';
 		}
 
 		function show_items_below_summary() {
@@ -3007,6 +3028,8 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 			$items = apply_filters( 'woobt_show_items', self::get_items( $product_id, 'view' ), $product_id );
 
 			if ( ! empty( $items ) ) {
+				// show accessories title
+				echo '<h3 class="woobt-accessories-title">Accessories</h3>';
 				// format items
 				foreach ( $items as $key => $item ) {
 					if ( is_array( $item ) ) {
@@ -3049,6 +3072,8 @@ if ( ! class_exists( 'WPCleverWoobt' ) && class_exists( 'WC_Product' ) ) {
 			}
 
 			if ( ! empty( $items ) ) {
+
+			
 				$before_text = apply_filters( 'woobt_before_text', self::get_text( $product, 'before' ), $product_id );
 				$after_text  = apply_filters( 'woobt_after_text', self::get_text( $product, 'after' ), $product_id );
 

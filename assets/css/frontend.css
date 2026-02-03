@@ -1,20 +1,21 @@
 .woobt-products-layout-default {
   display: flex;
   gap: 1rem;
-  z-index: 9999;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-behavior: smooth;
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
   position: relative;
-  padding-bottom: 10px;
   -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
   will-change: scroll-position; /* Optimize for scrolling */
 }
-.woobt-layout-default{
-    margin: 20px 0;
+@media (min-width: 1001px) {
+  .woobt-layout-default{
+    margin-top:4rem;
 }
+}
+
 .woobt-products-layout-default::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
 }
@@ -25,6 +26,7 @@
   max-width: calc(50% - 0.75rem);
   display: flex;
   flex-direction: column;
+  /* background-color: #f9f9f9; */
 }
 
 /* PC端：最多显示4个 */
@@ -39,7 +41,9 @@
 .woobt-products .woobt-product.woobt-hide-this {
   display: none !important;
 }
-
+.woobt-title{
+    margin: 10px 0 5px 0;
+}
 .woobt-title-inner a {
   /* 最多两行 */
   display: -webkit-box;
@@ -47,6 +51,8 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #000;
+  line-height: 1.4;
 }
 .woobt-price {
   display: flex;
@@ -83,9 +89,9 @@
   position: absolute;
   top: 8px;
   left: 8px;
-  padding: 4px 12px;
+  padding: 4px 8px;
   color: #fff;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: bold;
   letter-spacing: 0.5px;
   border-radius: 3px;
@@ -161,4 +167,21 @@
 /* WooCommerce notice styles for add to cart */
 .woobt-notice {
   margin-bottom: 1rem;
+}
+
+/* 当视口宽度小于等于1000px时，隐藏after-thumbnails的内容，显示在product_meta_end后面的内容 */
+@media (max-width: 1000px) {
+  .woobt-after-thumbnails-wrapper {
+    display: none !important;
+  }
+  
+  .woobt-wrap.woobt-meta-end {
+    display: block !important;
+    margin-top: 20px;
+  }
+  .woobt-accessories-title {
+    margin: 0 0 15px 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
 }

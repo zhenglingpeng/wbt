@@ -846,6 +846,14 @@ function woobt_init_scroll_controls($wrap) {
         var scrollLeft = $products.scrollLeft();
         var scrollWidth = $products[0].scrollWidth;
         var clientWidth = $products[0].clientWidth;
+
+        // 如果内容宽度小于等于容器宽度，说明全部商品一屏放得下，隐藏滚动按钮
+        if (scrollWidth <= clientWidth + 5) {
+            $scrollControls.hide();
+            return;
+        } else {
+            $scrollControls.show();
+        }
         
         if (scrollLeft <= 5) {
             $leftBtn.prop('disabled', true);
